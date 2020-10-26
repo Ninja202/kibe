@@ -12,6 +12,8 @@ import net.minecraft.util.math.BlockPos
 import net.minecraft.util.shape.VoxelShape
 import net.minecraft.world.BlockView
 import net.minecraft.world.World
+import net.minecraft.screen.ScreenHandler
+import net.minecraft.util.ItemScatterer
 
 class TrashCan: BlockWithEntity(FabricBlockSettings.of(Material.STONE, MaterialColor.STONE).requiresTool().strength(1.5F, 6.0F)) {
 
@@ -39,4 +41,22 @@ class TrashCan: BlockWithEntity(FabricBlockSettings.of(Material.STONE, MaterialC
         return Block.createCuboidShape(1.0, 0.0, 1.0, 15.0, 16.0, 15.0)
     }
 
+    override fun onStateReplaced(state: BlockState, world: World, pos: BlockPos, newState: BlockState, moved: Boolean) {
+        if (state.getBlock() != newState.getBlock()) {
+            val blockEntity = world.getBlockEntity(pos)
+            if (blockEntity is TrashCanEntity) {
+                ItemScatterer.spawn(world, pos, blockEntity)
+                world.updateComparators(pos,this)
+            }
+            super.onStateReplaced(state, world, pos, newState, moved)
+        }
+    }
+
+    override fun hasComparatorOutput(state: BlockState): Boolean {
+        return true
+    }
+
+    override fun getComparatorOutput(state: BlockState, world: World, pos: BlockPos): Int {
+        return ScreenHandler.calculateComparatorOutput(world.getBlockEntity(pos))
+    }
 }

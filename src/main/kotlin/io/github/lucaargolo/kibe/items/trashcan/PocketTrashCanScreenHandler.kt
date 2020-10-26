@@ -12,6 +12,11 @@ import net.minecraft.screen.slot.Slot
 import net.minecraft.util.Hand
 import net.minecraft.util.collection.DefaultedList
 import net.minecraft.world.World
+import net.minecraft.inventory.Inventories
+import net.minecraft.block.BlockState
+import net.minecraft.text.TranslatableText
+import net.minecraft.text.Text
+import net.minecraft.util.ItemScatterer
 
 @Suppress("UNUSED_PARAMETER")
 class PocketTrashCanScreenHandler(syncId: Int, playerInventory: PlayerInventory, hand: Hand, val world: World, tag: CompoundTag?): ScreenHandler(getContainerInfo(POCKET_TRASH_CAN)?.handlerType, syncId) {
@@ -29,21 +34,30 @@ class PocketTrashCanScreenHandler(syncId: Int, playerInventory: PlayerInventory,
         }
 
         override fun setStack(slot: Int, stack: ItemStack?) {
-            inventory[slot] = ItemStack.EMPTY
+            if (stack?.getEnchantments()?.toString()?.contains("trash_safe") == true) {
+                inventory[slot] = stack
+            }
+            else {
+                inventory[slot] = ItemStack.EMPTY
+            }
         }
 
         override fun isEmpty() = inventory.all { it.isEmpty }
 
         override fun removeStack(slot: Int, amount: Int): ItemStack {
-            return ItemStack.EMPTY
+            var result: ItemStack = Inventories.splitStack(inventory, slot, amount)
+            if (!result.isEmpty()) {
+                markDirty()
+            }
+            return result
         }
 
         override fun removeStack(slot: Int): ItemStack {
-            return ItemStack.EMPTY
+            return Inventories.removeStack(inventory, slot)
         }
 
         override fun getStack(slot: Int): ItemStack {
-            return ItemStack.EMPTY
+            return inventory[slot]
         }
 
         override fun canPlayerUse(player: PlayerEntity?): Boolean {
@@ -99,4 +113,8 @@ class PocketTrashCanScreenHandler(syncId: Int, playerInventory: PlayerInventory,
         return itemStack
     }
 
+    override fun close(player: PlayerEntity?) {
+        super.close(player)
+        dropInventory(player, world, synchronizedInventory)
+    }
 }
