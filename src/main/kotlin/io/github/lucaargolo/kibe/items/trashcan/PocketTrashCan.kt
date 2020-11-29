@@ -15,5 +15,4 @@ class PocketTrashCan(settings: Settings): Item(settings) {
         player.openHandledScreen(ItemScreenHandlerFactory(this, hand, tag))
         return TypedActionResult.success(player.getStackInHand(hand))
     }
-
 }

@@ -97,8 +97,8 @@ class TrashCanScreenHandler(syncId: Int, playerInventory: PlayerInventory, val e
     }
 
     override fun transferSlot(player: PlayerEntity?, invSlot: Int): ItemStack? {
-        var itemStack = ItemStack.EMPTY
-        val slot = this.slots[invSlot]
+        var itemStack: ItemStack = ItemStack.EMPTY
+        val slot: Slot = this.slots[invSlot]
         if (slot != null && slot.hasStack()) {
             val itemStack2 = slot.stack
             itemStack = itemStack2.copy()
