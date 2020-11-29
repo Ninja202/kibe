@@ -1,84 +1,62 @@
 package io.github.lucaargolo.kibe.blocks.trashcan
 
-import io.github.lucaargolo.kibe.blocks.getEntityType
-import net.minecraft.block.entity.LockableContainerBlockEntity
+import io.github.lucaargolo.kibe.utils.BlockScreenHandlerFactory
+import net.fabricmc.fabric.api.`object`.builder.v1.block.FabricBlockSettings
+import net.minecraft.block.*
+import net.minecraft.block.entity.BlockEntity
 import net.minecraft.entity.player.PlayerEntity
-import net.minecraft.entity.player.PlayerInventory
-import net.minecraft.item.ItemStack
+import net.minecraft.util.ActionResult
+import net.minecraft.util.Hand
+import net.minecraft.util.hit.BlockHitResult
+import net.minecraft.util.math.BlockPos
+import net.minecraft.util.shape.VoxelShape
+import net.minecraft.world.BlockView
+import net.minecraft.world.World
 import net.minecraft.screen.ScreenHandler
-import net.minecraft.text.LiteralText
-import net.minecraft.text.Text
-import net.minecraft.text.TranslatableText
-import net.minecraft.util.collection.DefaultedList
-import net.minecraft.inventory.Inventories
-import net.minecraft.nbt.CompoundTag
-import net.minecraft.block.BlockState
+import net.minecraft.util.ItemScatterer
 
-class TrashCanEntity(trashCan: TrashCan): LockableContainerBlockEntity(getEntityType(trashCan)) {
+class TrashCan: BlockWithEntity(FabricBlockSettings.of(Material.STONE, MaterialColor.STONE).requiresTool().strength(1.5F, 6.0F)) {
 
-    var inventory: DefaultedList<ItemStack> = DefaultedList.ofSize(1, ItemStack.EMPTY)
+    override fun createBlockEntity(view: BlockView?): BlockEntity = TrashCanEntity(this)
 
-    override fun createScreenHandler(i: Int, playerInventory: PlayerInventory?): ScreenHandler? {
-        return null
+    override fun onUse(state: BlockState, world: World, pos: BlockPos, player: PlayerEntity, hand: Hand, hit: BlockHitResult): ActionResult {
+        player.openHandledScreen(BlockScreenHandlerFactory(this, pos))
+        return ActionResult.SUCCESS
     }
 
-    override fun size() = inventory.size
-
-
-    override fun isEmpty() = inventory.all { it.isEmpty }
-
-    override fun getStack(slot: Int): ItemStack {
-        return inventory[slot]
+    override fun getRenderType(state: BlockState?): BlockRenderType {
+        return BlockRenderType.MODEL
     }
 
-    override fun removeStack(slot: Int, amount: Int): ItemStack {
-        var result: ItemStack = Inventories.splitStack(inventory, slot, amount)
-        if (!result.isEmpty()) {
-            markDirty()
-        }
-        return result
+    override fun hasSidedTransparency(state: BlockState?): Boolean {
+        return true
     }
 
-    override fun removeStack(slot: Int): ItemStack {
-        return Inventories.removeStack(inventory, slot)
+
+    override fun getOutlineShape(state: BlockState, view: BlockView, pos: BlockPos, context: ShapeContext): VoxelShape {
+        return Block.createCuboidShape(1.0, 0.0, 1.0, 15.0, 16.0, 15.0)
     }
 
-    override fun setStack(slot: Int, stack: ItemStack?) {
-        if (stack?.getEnchantments()?.toString()?.contains("trash_safe") == true) {
-            inventory[slot] = stack
-        }
-        else {
-            inventory[slot] = ItemStack.EMPTY
+    override fun getCollisionShape(state: BlockState, view: BlockView, pos: BlockPos, context: ShapeContext): VoxelShape {
+        return Block.createCuboidShape(1.0, 0.0, 1.0, 15.0, 16.0, 15.0)
+    }
+
+    override fun onStateReplaced(state: BlockState, world: World, pos: BlockPos, newState: BlockState, moved: Boolean) {
+        if (state.getBlock() != newState.getBlock()) {
+            val blockEntity = world.getBlockEntity(pos)
+            if (blockEntity is TrashCanEntity) {
+                ItemScatterer.spawn(world, pos, blockEntity)
+                world.updateComparators(pos,this)
+            }
+            super.onStateReplaced(state, world, pos, newState, moved)
         }
     }
 
-    override fun clear() {
-        inventory.clear()
+    override fun hasComparatorOutput(state: BlockState): Boolean {
+        return true
     }
 
-    override fun getContainerName(): Text = TranslatableText("screen.kibe.trash_can")
-
-    override fun canPlayerUse(player: PlayerEntity?): Boolean {
-        return if (world!!.getBlockEntity(pos) != this) {
-            false
-        } else {
-            player!!.squaredDistanceTo(pos.x + 0.5, pos.y + 0.5, pos.z + 0.5) <= 64.0
-        }
-    }
-
-    override fun getDisplayName(): Text {
-        return TranslatableText(getCachedState().getBlock().getTranslationKey())
-    }
-
-    override fun fromTag(state: BlockState, tag: CompoundTag) {
-        super.fromTag(state, tag)
-        inventory = DefaultedList.ofSize(1, ItemStack.EMPTY)
-        Inventories.fromTag(tag, this.inventory)
-    }
-
-    override fun toTag(tag: CompoundTag): CompoundTag {
-        super.toTag(tag)
-        Inventories.toTag(tag, this.inventory)
-        return tag
+    override fun getComparatorOutput(state: BlockState, world: World, pos: BlockPos): Int {
+        return ScreenHandler.calculateComparatorOutput(world.getBlockEntity(pos))
     }
 }
