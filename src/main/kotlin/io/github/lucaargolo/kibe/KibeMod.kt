@@ -7,21 +7,21 @@ import alexiil.mc.lib.attributes.fluid.FluidContainerRegistry
 import alexiil.mc.lib.attributes.fluid.amount.FluidAmount
 import alexiil.mc.lib.attributes.fluid.volume.FluidKeys
 import alexiil.mc.lib.attributes.fluid.volume.FluidVolume
-import io.github.lucaargolo.kibe.blocks.BIG_TORCH
+import io.github.lucaargolo.kibe.blocks.*
 import io.github.lucaargolo.kibe.blocks.COOLER
 import io.github.lucaargolo.kibe.blocks.ENTANGLED_CHEST
 import io.github.lucaargolo.kibe.blocks.ENTANGLED_TANK
-import io.github.lucaargolo.kibe.blocks.VACUUM_HOPPER
 import io.github.lucaargolo.kibe.blocks.chunkloader.ChunkLoaderBlockEntity
 import io.github.lucaargolo.kibe.blocks.chunkloader.ChunkLoaderState
+import io.github.lucaargolo.kibe.blocks.drawbridge.DrawbridgeCustomModel
 import io.github.lucaargolo.kibe.blocks.entangledtank.EntangledTankState
-import io.github.lucaargolo.kibe.blocks.initBlocks
-import io.github.lucaargolo.kibe.blocks.initBlocksClient
 import io.github.lucaargolo.kibe.blocks.tank.TankCustomModel
 import io.github.lucaargolo.kibe.blocks.vacuum.VacuumHopperScreen
 import io.github.lucaargolo.kibe.compat.initTrinketsCompat
 import io.github.lucaargolo.kibe.effects.CURSED_EFFECT
 import io.github.lucaargolo.kibe.effects.initEffects
+import io.github.lucaargolo.kibe.entities.initEntities
+import io.github.lucaargolo.kibe.entities.initEntitiesClient
 import io.github.lucaargolo.kibe.fluids.LIQUID_XP
 import io.github.lucaargolo.kibe.fluids.initFluids
 import io.github.lucaargolo.kibe.fluids.initFluidsClient
@@ -44,6 +44,7 @@ import net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.model.ModelLoadingRegistry
 import net.fabricmc.fabric.api.client.model.ModelVariantProvider
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
 import net.fabricmc.fabric.api.client.rendering.v1.BuiltinItemRendererRegistry
 import net.fabricmc.fabric.api.event.client.ClientSpriteRegistryCallback
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
@@ -51,11 +52,8 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.fabricmc.fabric.api.loot.v1.FabricLootPoolBuilder
 import net.fabricmc.fabric.api.loot.v1.FabricLootSupplierBuilder
 import net.fabricmc.fabric.api.loot.v1.event.LootTableLoadingCallback
-import net.fabricmc.fabric.api.network.ClientSidePacketRegistry
-import net.fabricmc.fabric.api.network.PacketContext
-import net.fabricmc.fabric.api.network.ServerSidePacketRegistry
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.fabricmc.loader.launch.common.FabricLauncherBase
-import net.minecraft.client.MinecraftClient
 import net.minecraft.client.render.RenderLayer
 import net.minecraft.client.util.ModelIdentifier
 import net.minecraft.item.Items
@@ -71,7 +69,6 @@ import net.minecraft.predicate.entity.EntityEffectPredicate
 import net.minecraft.predicate.entity.EntityPredicate
 import net.minecraft.resource.ResourceManager
 import net.minecraft.screen.PlayerScreenHandler
-import net.minecraft.server.network.ServerPlayerEntity
 import net.minecraft.util.Identifier
 import net.minecraft.util.math.ChunkPos
 import java.util.*
@@ -96,6 +93,7 @@ fun init() {
     initTooltip()
     initBlocks()
     initItems()
+    initEntities()
     initEffects()
     initLootTables()
     initFluids()
@@ -110,19 +108,20 @@ fun init() {
 fun initClient() {
     initBlocksClient()
     initItemsClient()
+    initEntitiesClient()
     initFluidsClient()
     initExtrasClient()
     initPacketsClient()
 }
 
 fun initPackets() {
-    ServerSidePacketRegistry.INSTANCE.register(CHUNK_MAP_CLICK) { packetContext: PacketContext, attachedData: PacketByteBuf ->
+    ServerPlayNetworking.registerGlobalReceiver(CHUNK_MAP_CLICK) { server, player, _, attachedData, _ ->
         val x = attachedData.readInt()
         val z = attachedData.readInt()
         val pos = attachedData.readBlockPos()
         if(x in (-2..2) || z in (-2..2)) {
-            packetContext.taskQueue.execute {
-                val world = packetContext.player.world
+            server.execute {
+                val world = player.world
                 val be = world.getBlockEntity(pos) as? ChunkLoaderBlockEntity
                 be?.let {
                     if(be.enabledChunks.contains(Pair(x, z))) {
@@ -139,7 +138,7 @@ fun initPackets() {
         }
     }
 
-    ServerSidePacketRegistry.INSTANCE.register(REQUEST_DIRTY_TANK_STATES) { packetContext: PacketContext, attachedData: PacketByteBuf ->
+    ServerPlayNetworking.registerGlobalReceiver(REQUEST_DIRTY_TANK_STATES)  { server, player, _, attachedData, _ ->
         val list = linkedSetOf<Pair<String, String>>()
         val qnt = attachedData.readInt()
         repeat(qnt) {
@@ -147,56 +146,35 @@ fun initPackets() {
             val second = attachedData.readString(32767)
             list.add(Pair(first, second))
         }
-        packetContext.taskQueue.execute {
-            (packetContext.player as? ServerPlayerEntity)?.let { player -> EntangledTankState.SERVER_PLAYER_REQUESTS[player] = list}
+        server.execute {
+            EntangledTankState.SERVER_PLAYER_REQUESTS[player] = list
         }
     }
 
 }
 
 fun initPacketsClient() {
-    BuiltinItemRendererRegistry.INSTANCE.register(ENTANGLED_CHEST, EntangledChestBlockItemDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(ENTANGLED_TANK, EntangledTankBlockItemDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(WHITE_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(ORANGE_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(MAGENTA_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(LIGHT_BLUE_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(YELLOW_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(LIME_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(PINK_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(GRAY_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(LIGHT_GRAY_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(CYAN_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(BLUE_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(PURPLE_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(GREEN_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(BROWN_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(RED_GLIDER, GliderDynamicRenderer())
-    BuiltinItemRendererRegistry.INSTANCE.register(BLACK_GLIDER, GliderDynamicRenderer())
-
-    ClientSidePacketRegistry.INSTANCE.register(SYNCHRONIZE_LAST_RECIPE_PACKET) { packetContext: PacketContext, attachedData: PacketByteBuf ->
-        val id = attachedData.readIdentifier()
-        val recipe = VACUUM_HOPPER_RECIPE_SERIALIZER.read(id, attachedData)
-        packetContext.taskQueue.execute {
-            if(MinecraftClient.getInstance().currentScreen is VacuumHopperScreen) {
-                val screen = MinecraftClient.getInstance().currentScreen as VacuumHopperScreen
-                screen.screenHandler.lastRecipe = recipe
-            }
+    ClientPlayNetworking.registerGlobalReceiver(SYNCHRONIZE_LAST_RECIPE_PACKET) { client, _, buf, _ ->
+        val id = buf.readIdentifier()
+        val recipe = VACUUM_HOPPER_RECIPE_SERIALIZER.read(id, buf)
+        client.execute {
+            val screen = client.currentScreen as? VacuumHopperScreen
+            screen?.screenHandler?.lastRecipe = recipe
         }
     }
 
-    ClientSidePacketRegistry.INSTANCE.register(SYNCHRONIZE_DIRTY_TANK_STATES) { packetContext: PacketContext, attachedData: PacketByteBuf ->
-        val tot = attachedData.readInt()
+    ClientPlayNetworking.registerGlobalReceiver(SYNCHRONIZE_DIRTY_TANK_STATES) { client, _, buf, _ ->
+        val tot = buf.readInt()
         repeat(tot) {
-            val key = attachedData.readString()
-            val qnt = attachedData.readInt()
+            val key = buf.readString()
+            val qnt = buf.readInt()
             val map = mutableMapOf<String, FluidVolume>()
             repeat(qnt) {
-                val colorCode = attachedData.readString()
-                val fluidVolume = FluidVolume.fromMcBuffer(attachedData)
+                val colorCode = buf.readString()
+                val fluidVolume = FluidVolume.fromMcBuffer(buf)
                 map[colorCode] = fluidVolume
             }
-            packetContext.taskQueue.execute {
+            client.execute {
                 val state = EntangledTankState.getOrCreateClientState(key)
                 map.forEach { (colorCode, fluidVolume) ->
                     state.getOrCreateInventory(colorCode).setInvFluid(0, fluidVolume, Simulation.ACTION)
@@ -209,7 +187,7 @@ fun initPacketsClient() {
 
 fun initExtras() {
     AutoConfig.register(ModConfig::class.java) { cfg: Config, cls: Class<ModConfig> -> JanksonConfigSerializer(cfg, cls) }
-    MOD_CONFIG = AutoConfig.getConfigHolder(ModConfig::class.java).config;
+    MOD_CONFIG = AutoConfig.getConfigHolder(ModConfig::class.java).config
     ServerLifecycleEvents.SERVER_STARTED.register { server ->
         server.overworld.persistentStateManager.getOrCreate({ ChunkLoaderState(server, "kibe_chunk_loaders") }, "kibe_chunk_loaders")
     }
@@ -237,7 +215,7 @@ fun initExtras() {
                     fluidVolume.toMcBuffer(passedData)
                 }
             }
-            ServerSidePacketRegistry.INSTANCE.sendToPlayer(player, SYNCHRONIZE_DIRTY_TANK_STATES, passedData)
+            ServerPlayNetworking.send(player, SYNCHRONIZE_DIRTY_TANK_STATES, passedData)
         }
     }
     FluidContainerRegistry.mapContainer(Items.GLASS_BOTTLE, Items.EXPERIENCE_BOTTLE, LIQUID_XP.key.withAmount(FluidAmount.BOTTLE))
@@ -257,7 +235,7 @@ fun initExtrasClient() {
                         passedData.writeString(it.first)
                         passedData.writeString(it.second)
                     }
-                    ClientSidePacketRegistry.INSTANCE.sendToServer(REQUEST_DIRTY_TANK_STATES, passedData)
+                    ClientPlayNetworking.send(REQUEST_DIRTY_TANK_STATES, passedData)
                 }
             }
 
@@ -272,7 +250,7 @@ fun initExtrasClient() {
         }
         registry.register(Identifier(MOD_ID, "block/tank"))
     })
-    ModelLoadingRegistry.INSTANCE.registerAppender { _: ResourceManager?, out: Consumer<ModelIdentifier?> ->
+    ModelLoadingRegistry.INSTANCE.registerModelProvider { _: ResourceManager, out: Consumer<Identifier> ->
         out.accept(ModelIdentifier(Identifier(MOD_ID, "redstone_timer_structure"), ""))
         out.accept(ModelIdentifier(Identifier(MOD_ID, "glider_active"), "inventory"))
         out.accept(ModelIdentifier(Identifier(MOD_ID, "glider_handle"), "inventory"))
@@ -318,12 +296,16 @@ fun initExtrasClient() {
         out.accept(ModelIdentifier(Identifier(MOD_ID, "entangled_bucket_gold_core"), "inventory"))
         out.accept(ModelIdentifier(Identifier(MOD_ID, "entangled_bucket_diamond_core"), "inventory"))
     }
+    BlockRenderLayerMap.INSTANCE.putBlock(DRAWBRIDGE, RenderLayer.getCutoutMipped())
     BlockRenderLayerMap.INSTANCE.putBlock(VACUUM_HOPPER, RenderLayer.getTranslucent())
-    BlockRenderLayerMap.INSTANCE.putBlock(BIG_TORCH, RenderLayer.getCutout())
+    BlockRenderLayerMap.INSTANCE.putBlock(BIG_TORCH, RenderLayer.getCutoutMipped())
     BlockRenderLayerMap.INSTANCE.putBlock(COOLER, RenderLayer.getTranslucent())
-    BlockRenderLayerMap.INSTANCE.putBlock(ENTANGLED_TANK, RenderLayer.getCutout())
+    BlockRenderLayerMap.INSTANCE.putBlock(ENTANGLED_TANK, RenderLayer.getCutoutMipped())
     ModelLoadingRegistry.INSTANCE.registerVariantProvider {
         ModelVariantProvider { modelIdentifier, _ ->
+            if(modelIdentifier.namespace == MOD_ID && modelIdentifier.path == "drawbridge") {
+                return@ModelVariantProvider DrawbridgeCustomModel()
+            }
             if(modelIdentifier.namespace == MOD_ID && modelIdentifier.path == "tank" && modelIdentifier.variant != "inventory") {
                 val model = TankCustomModel()
                 TANK_CUSTOM_MODEL = model
@@ -332,6 +314,24 @@ fun initExtrasClient() {
             return@ModelVariantProvider null
         }
     }
+    BuiltinItemRendererRegistry.INSTANCE.register(ENTANGLED_CHEST, EntangledChestBlockItemDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(ENTANGLED_TANK, EntangledTankBlockItemDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(WHITE_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(ORANGE_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(MAGENTA_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(LIGHT_BLUE_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(YELLOW_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(LIME_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(PINK_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(GRAY_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(LIGHT_GRAY_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(CYAN_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(BLUE_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(PURPLE_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(GREEN_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(BROWN_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(RED_GLIDER, GliderDynamicRenderer())
+    BuiltinItemRendererRegistry.INSTANCE.register(BLACK_GLIDER, GliderDynamicRenderer())
 }
 
 fun initLootTables() {
